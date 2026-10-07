@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Elastic Stickman - Dodging Simulation</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
+
+        html, body {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #f7f7f5;
+            background-image: 
+                radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.8) 0%, rgba(240, 240, 235, 0.5) 100%),
+                linear-gradient(rgba(220, 220, 215, 0.3) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(220, 220, 215, 0.3) 1px, transparent 1px);
+            background-size: 100% 100%, 30px 30px, 30px 30px;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }
+
+        .svg-container {
+            filter: drop-shadow(0 15px 12px rgba(0, 0, 0, 0.08));
+        }
+
+        .speech-bubble {
+            transform-origin: bottom center;
+            animation: bubblePop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            pointer-events: none;
+        }
+
+        @keyframes bubblePop {
+            0% { opacity: 0; transform: scale(0.4) translateY(10px); }
+            100% { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        .btn-action {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .btn-action:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px -5px rgba(0,0,0,0.15);
+        }
+
+        .btn-action:active {
+            transform: translateY(1px);
+        }
+
+        /* Focus state for accessibility */
+        *:focus-visible {
+            outline: 3px solid #6366f1;
+            outline-offset: 3px;
+        }
+
+        /* Reduced motion support */
+        @media (prefers-reduced-motion: reduce) {
+            .speech-bubble {
+                animation: none;
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col justify-between items-center p-2 sm:p-4 text-slate-800 overflow-hidden box-border">
+
+    <!-- Top Bar / Header UI -->
+    <header class="w-full max-w-xl flex justify-between items-center z-10 px-2 shrink-0">
+        <div class="flex items-center space-x-3">
+            <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-bold text-sm sm:text-lg shadow-md shrink-0">
+                🌟
+            </div>
+            <div>
+                <h1 class="text-base sm:text-xl font-extrabold tracking-tight text-slate-900 leading-tight">jadi karena hari ini qin berkurang umurnya</h1>
+                <p class="text-[10px] sm:text-xs text-slate-500 font-medium">buat kamu, yg lagi stres⭐</p>
+            </div>
+        </div>
+
+        <!-- Dodge Counter -->
+        <div class="bg-white/80 backdrop-blur-md border border-slate-200/80 rounded-2xl px-3 py-1 sm:px-5 sm:py-2 shadow-sm flex items-center space-x-2 shrink-0">
+            <span class="text-[10px] sm:text-xs font-semibold text-slate-400 uppercase tracking-wider">Dodges</span>
+            <span id="dodge-counter" class="text-lg sm:text-2xl font-black text-indigo-600 transition-all duration-150">0</span>
+        </div>
+    </header>
+
+    <!-- Main Playground Stage (Optimized for Landscape / Laptop screens) -->
+    <main class="relative w-full max-w-xl flex-1 min-h-0 flex items-center justify-center my-1 cursor-pointer overflow-hidden" id="interactive-stage" aria-label="Area interaktif stickman">
+        
+        <!-- Speech Bubble Container -->
+        <div id="speech-container" class="absolute z-20 pointer-events-none" style="display: none;">
+            <div class="speech-bubble bg-slate-900 text-white text-xs sm:text-sm font-bold py-1.5 px-3.5 rounded-2xl shadow-xl relative">
+                <span id="speech-text">Hey!</span>
+                <div class="absolute -bottom-2 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] border-t-slate-900"></div>
+            </div>
+        </div>
+
+        <!-- Touch / Click Visual Ripple Effect SVG Overlay -->
+        <svg id="ripple-svg" class="absolute inset-0 w-full h-full pointer-events-none z-10" viewBox="0 0 400 750" preserveAspectRatio="xMidYMid meet"></svg>
+
+        <!-- Main Stickman SVG -->
+        <svg id="stickman-svg" class="w-full h-full max-h-full svg-container select-none" viewBox="0 0 400 750" preserveAspectRatio="xMidYMid meet">
+            
+            <defs>
+                <!-- Floor Line Gradient -->
+                <linearGradient id="floorGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stop-color="#cbd5e1" stop-opacity="0" />
+                    <stop offset="20%" stop-color="#94a3b8" stop-opacity="0.6" />
+                    <stop offset="50%" stop-color="#64748b" stop-opacity="0.9" />
+                    <stop offset="80%" stop-color="#94a3b8" stop-opacity="0.6" />
+                    <stop offset="100%" stop-color="#cbd5e1" stop-opacity="0" />
+                </linearGradient>
+
+                <!-- Shadow Radial Gradients -->
+                <radialGradient id="shadowGrad" cx="50%" cy="50%" r="50%">
+                    <stop offset="0%" stop-color="#0f172a" stop-opacity="0.25" />
+                    <stop offset="100%" stop-color="#0f172a" stop-opacity="0" />
+                </radialGradient>
+            </defs>
+
+            <!-- Floor Line & Target Markers -->
+            <line x1="40" y1="680" x2="360" y2="680" stroke="url(#floorGrad)" stroke-width="2.5" stroke-linecap="round" />
+            
+            <!-- Ground Shadows Under Dynamic Feet -->
+            <ellipse id="left-foot-shadow" cx="165" cy="682" rx="18" ry="5" fill="url(#shadowGrad)" />
+            <ellipse id="right-foot-shadow" cx="235" cy="682" rx="18" ry="5" fill="url(#shadowGrad)" />
+            <ellipse id="body-center-shadow" cx="200" cy="683" rx="35" ry="7" fill="url(#shadowGrad)" opacity="0.4" />
+
+            <!-- FLOATING DISCO TEXTS GROUP -->
+            <g id="floating-texts-group"></g>
+
+            <!-- STICKMAN GRAPHICS GROUP -->
+            <g id="stickman-group" stroke="#0f172a" stroke-linecap="round" stroke-linejoin="round">
+                
+                <!-- Dynamic Feet Base Visuals -->
+                <path id="left-foot" d="M 150 680 L 165 680" stroke-width="6" />
+                <path id="right-foot" d="M 235 680 L 250 680" stroke-width="6" />
+
+                <!-- Left Leg (2 Segments) -->
+                <line id="left-upper-leg" stroke-width="5.5" />
+                <line id="left-lower-leg" stroke-width="5.5" />
+                <circle id="left-knee-joint" r="3.5" fill="#0f172a" stroke="none" />
+
+                <!-- Right Leg (2 Segments) -->
+                <line id="right-upper-leg" stroke-width="5.5" />
+                <line id="right-lower-leg" stroke-width="5.5" />
+                <circle id="right-knee-joint" r="3.5" fill="#0f172a" stroke="none" />
+
+                <!-- Curved Torso Spine (Dynamic Path) -->
+                <path id="torso-path" fill="none" stroke-width="6" />
+
+                <!-- Left Arm (2 Segments) -->
+                <line id="left-upper-arm" stroke-width="4.5" />
+                <line id="left-lower-arm" stroke-width="4" />
+                <circle id="left-elbow-joint" r="3" fill="#0f172a" stroke="none" />
+
+                <!-- Right Arm (2 Segments) -->
+                <line id="right-upper-arm" stroke-width="4.5" />
+                <line id="right-lower-arm" stroke-width="4" />
+                <circle id="right-elbow-joint" r="3" fill="#0f172a" stroke="none" />
+
+                <!-- Pelvis Joint -->
+                <circle id="pelvis-joint" r="4.5" fill="#0f172a" stroke="none" />
+
+                <!-- Neck Line -->
+                <line id="neck-line" stroke-width="4.5" />
+
+                <!-- Head Group -->
+                <g id="head-group">
+                    <circle id="head-circle" r="22" fill="#0f172a" stroke="none" />
+                    <!-- Minimalist Expression Eyes -->
+                    <circle id="eye-left" cx="-7" cy="-2" r="2.5" fill="#ffffff" stroke="none" />
+                    <circle id="eye-right" cx="7" cy="-2" r="2.5" fill="#ffffff" stroke="none" />
+                    <!-- Floating Text Above Head (Ukuran font diperbesar menjadi 20 & posisi y disesuaikan) -->
+                    <text id="head-text" x="0" y="-36" text-anchor="middle" fill="#0f172a" font-size="20" font-weight="800" letter-spacing="0.5">qin 15 tahun</text>
+                </g>
+            </g>
+        </svg>
+    </main>
+
+    <!-- Bottom Control Bar & Instructions -->
+    <footer class="w-full max-w-md flex flex-col items-center space-y-1 z-10 shrink-0">
+        <div class="flex items-center justify-center w-full">
+            <button id="reset-btn" class="btn-action bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold px-4 py-1.5 rounded-xl shadow-sm text-xs sm:text-sm flex items-center space-x-2" aria-label="Reset game counter dan posisi stickman">
+                <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.033 8.033 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                <span>Reset</span>
+            </button>
+        </div>
+
+        <div class="text-center text-[10px] sm:text-xs text-slate-400 font-medium">
+            Gunakan <kbd class="px-1.5 py-0.5 bg-slate-200 text-slate-700 rounded text-[9px] sm:text-[10px]">Space</kbd> atau <kbd class="px-1.5 py-0.5 bg-slate-200 text-slate-700 rounded text-[9px] sm:text-[10px]">Panah</kbd> untuk poke via keyboard.
+		★ faiza syg kirby💌 ★
+        </div>
+    </footer>
+
+    <script>
+        (function() {
+            "use strict";
+
+            const SVG_VIEWBOX = { width: 400, height: 750 };
+            const FLOOR_Y = 680;
+
+            // Base Foot Positions (Resting Floor Coordinates)
+            const BASE_LEFT_FOOT = Object.freeze({ x: 165, y: FLOOR_Y });
+            const BASE_RIGHT_FOOT = Object.freeze({ x: 235, y: FLOOR_Y });
+
+            // Skeletal Bone Lengths
+            const LEG_LENGTH_UPPER = 105;
+            const LEG_LENGTH_LOWER = 105;
+            const ARM_LENGTH_UPPER = 75;
+            const ARM_LENGTH_LOWER = 75;
+            const HEAD_RADIUS = 22;
+
+            // Rest Default Relative Positions
+            const BASE_PELVIS = { x: 200, y: 480 };
+            const BASE_CHEST = { x: 200, y: 270 };
+            const BASE_HEAD = { x: 200, y: 150 };
+
+            // Motion Limits & Physics Parameters
+            const MAX_PELVIS_SWAY = 55;
+
+            /* ------------------------------------------------------------------
+             * 2. GAME STATE & SIMULATION NODES
+             * ------------------------------------------------------------------ */
+            let dodgeCount = 0;
+            let prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+            // Global Hue Counter for Disco Effect
+            let globalHue = 0;
+
+            // 10 Floating Texts Configuration State (Free-Roaming around Mid-Upper Stage)
+            const floatingTexts = [];
+            const textGroupEl = document.getElementById('floating-texts-group');
+
+            // List teks kustom yang akan ditampilkan secara berurutan
+            const customLabels = [
+                "kti", "propkar", "tugas", "ph", "tahfidz",
+                "weiming", "chen zheyuan", "copper", "fazen", "ananta"
+            ];
+
+            // Initialize Floating Texts focused around middle & upper area for crisp readability
+            for (let idx = 0; idx < 10; idx++) {
+                const textEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                textEl.setAttribute('text-anchor', 'middle');
+                textEl.setAttribute('font-weight', '800');
+                // Ukuran font diperbesar dari '16' ke '24'
+                textEl.setAttribute('font-size', '24');
+                // High contrast stroke outline + drop-shadow for high legibility
+                textEl.setAttribute('stroke', '#0f172a');
+                textEl.setAttribute('stroke-width', '0.7');
+                textEl.setAttribute('paint-order', 'stroke fill');
+                textEl.setAttribute('style', 'filter: drop-shadow(0px 3px 6px rgba(0,0,0,0.25)); font-family: "Plus Jakarta Sans", sans-serif; pointer-events: none;');
+                textEl.textContent = customLabels[idx] || `teks ${idx + 1}`;
+                textGroupEl.appendChild(textEl);
+
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 1.2 + Math.random() * 1.3;
+
+                floatingTexts.push({
+                    id: idx + 1,
+                    el: textEl,
+                    x: 40 + Math.random() * 320,
+                    y: 100 + Math.random() * 380, // Concentrated in mid & upper zone (100 to 480)
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    rot: (Math.random() - 0.5) * 16,
+                    vRot: (Math.random() - 0.5) * 1.5,
+                    isKnocked: false,
+                    targetChangeTimer: Math.random() * 100,
+                    phase: idx * 0.63,
+                    opacity: 1
+                });
+            }
+
+            // Physics Nodes (Spring-Mass System)
+            const nodes = {
+                pelvis: { x: BASE_PELVIS.x, y: BASE_PELVIS.y, vx: 0, vy: 0 },
+                chest:  { x: BASE_CHEST.x,  y: BASE_CHEST.y,  vx: 0, vy: 0 },
+                head:   { x: BASE_HEAD.x,   y: BASE_HEAD.y,   vx: 0, vy: 0 },
+
+                // Elastic Feet Nodes
+                leftFoot:  { x: BASE_LEFT_FOOT.x,  y: BASE_LEFT_FOOT.y,  vx: 0, vy: 0 },
+                rightFoot: { x: BASE_RIGHT_FOOT.x, y: BASE_RIGHT_FOOT.y, vx: 0, vy: 0 },
+
+                // Arms Physics Ragdoll Targets
+                leftElbow:   { x: 140, y: 320, vx: 0, vy: 0 },
+                leftHand:    { x: 120, y: 390, vx: 0, vy: 0 },
+                rightElbow:  { x: 260, y: 320, vx: 0, vy: 0 },
+                rightHand:   { x: 280, y: 390, vx: 0, vy: 0 }
+            };
+
+            // Speech Phrases
+            const speechPhrases = [
+                "Hey!", "Nope!", "Too slow!", "Whoa!", "Missed me!", 
+                "Eits!", "Meletoy~", "Ups!", "Lentur banget!", "Slippery!"
+            ];
+
+            let speechTimeout = null;
+
+            /* ------------------------------------------------------------------
+             * 3. DOM ELEMENTS
+             * ------------------------------------------------------------------ */
+            const svg = document.getElementById('stickman-svg');
+            const stage = document.getElementById('interactive-stage');
+            const dodgeCounterEl = document.getElementById('dodge-counter');
+            const resetBtn = document.getElementById('reset-btn');
+            const speechContainer = document.getElementById('speech-container');
+            const speechText = document.getElementById('speech-text');
+            const rippleSvg = document.getElementById('ripple-svg');
+
+            // Stickman Body Parts DOM
+            const dom = {
+                leftFoot: document.getElementById('left-foot'),
+                rightFoot: document.getElementById('right-foot'),
+                leftFootShadow: document.getElementById('left-foot-shadow'),
+                rightFootShadow: document.getElementById('right-foot-shadow'),
+                leftUpperLeg: document.getElementById('left-upper-leg'),
+                leftLowerLeg: document.getElementById('left-lower-leg'),
+                leftKneeJoint: document.getElementById('left-knee-joint'),
+                rightUpperLeg: document.getElementById('right-upper-leg'),
+                rightLowerLeg: document.getElementById('right-lower-leg'),
+                rightKneeJoint: document.getElementById('right-knee-joint'),
+                torsoPath: document.getElementById('torso-path'),
+                pelvisJoint: document.getElementById('pelvis-joint'),
+                neckLine: document.getElementById('neck-line'),
+                headGroup: document.getElementById('head-group'),
+                eyeLeft: document.getElementById('eye-left'),
+                eyeRight: document.getElementById('eye-right'),
+                leftUpperArm: document.getElementById('left-upper-arm'),
+                leftLowerArm: document.getElementById('left-lower-arm'),
+                leftElbowJoint: document.getElementById('left-elbow-joint'),
+                rightUpperArm: document.getElementById('right-upper-arm'),
+                rightLowerArm: document.getElementById('right-lower-arm'),
+                rightElbowJoint: document.getElementById('right-elbow-joint'),
+                bodyCenterShadow: document.getElementById('body-center-shadow')
+            };
+
+            /* ------------------------------------------------------------------
+             * 5. INVERSE KINEMATICS (2-Bone Analytic IK)
+             * ------------------------------------------------------------------ */
+            function solve2SegmentIK(hip, foot, bendOutward, isLeftLeg = true, l1 = LEG_LENGTH_UPPER, l2 = LEG_LENGTH_LOWER) {
+                const dx = foot.x - hip.x;
+                const dy = foot.y - hip.y;
+                let dist = Math.hypot(dx, dy);
+
+                const maxDist = (l1 + l2) - 0.5;
+                const minDist = Math.abs(l1 - l2) + 0.5;
+                dist = Math.max(minDist, Math.min(maxDist, dist));
+
+                const angleToFoot = Math.atan2(dy, dx);
+
+                const cosHip = (l1 * l1 + dist * dist - l2 * l2) / (2 * l1 * dist);
+                const safeCosHip = Math.max(-1, Math.min(1, cosHip));
+                const hipAngleOffset = Math.acos(safeCosHip);
+
+                // Outward knee bending
+                const finalHipAngle = isLeftLeg 
+                    ? (bendOutward ? angleToFoot + hipAngleOffset : angleToFoot - hipAngleOffset)
+                    : (bendOutward ? angleToFoot - hipAngleOffset : angleToFoot + hipAngleOffset);
+
+                const kneeX = hip.x + l1 * Math.cos(finalHipAngle);
+                const kneeY = hip.y + l1 * Math.sin(finalHipAngle);
+
+                return { knee: { x: kneeX, y: kneeY }, foot: { x: foot.x, y: foot.y } };
+            }
+
+            function clamp(val, min, max) {
+                return Math.max(min, Math.min(max, val));
+            }
+
+            function applySpring(node, targetX, targetY, stiffness, damping) {
+                const ax = (targetX - node.x) * stiffness;
+                const ay = (targetY - node.y) * stiffness;
+                node.vx = (node.vx + ax) * damping;
+                node.vy = (node.vy + ay) * damping;
+                node.x += node.vx;
+                node.y += node.vy;
+            }
+
+            function updatePhysics() {
+                const stiffnessMult = prefersReducedMotion ? 1.8 : 1.0;
+                const dampingMult = prefersReducedMotion ? 0.6 : 0.82;
+
+                // 1. Elastic Feet Spring Dynamics
+                applySpring(nodes.leftFoot, BASE_LEFT_FOOT.x, BASE_LEFT_FOOT.y, 0.12 * stiffnessMult, 0.78);
+                applySpring(nodes.rightFoot, BASE_RIGHT_FOOT.x, BASE_RIGHT_FOOT.y, 0.12 * stiffnessMult, 0.78);
+
+                // Prevents feet cross-over
+                const MIN_FOOT_GAP = 30;
+                if (nodes.leftFoot.x > nodes.rightFoot.x - MIN_FOOT_GAP) {
+                    const center = (nodes.leftFoot.x + nodes.rightFoot.x) / 2;
+                    nodes.leftFoot.x = center - MIN_FOOT_GAP / 2;
+                    nodes.rightFoot.x = center + MIN_FOOT_GAP / 2;
+                }
+
+                nodes.leftFoot.x = clamp(nodes.leftFoot.x, 100, BASE_RIGHT_FOOT.x - 20);
+                nodes.rightFoot.x = clamp(nodes.rightFoot.x, BASE_LEFT_FOOT.x + 20, 300);
+
+                // 2. Pelvis Physics
+                const targetPelvisX = BASE_PELVIS.x + clamp(nodes.chest.x - BASE_CHEST.x, -MAX_PELVIS_SWAY, MAX_PELVIS_SWAY) * 0.45;
+                const targetPelvisY = BASE_PELVIS.y + Math.abs(nodes.chest.x - BASE_CHEST.x) * 0.12;
+                applySpring(nodes.pelvis, targetPelvisX, targetPelvisY, 0.08 * stiffnessMult, dampingMult);
+
+                // 3. Chest Physics
+                applySpring(nodes.chest, BASE_CHEST.x, BASE_CHEST.y, 0.05 * stiffnessMult, dampingMult);
+
+                // 4. Head Physics
+                const chestDX = nodes.chest.x - BASE_CHEST.x;
+                const targetHeadX = BASE_HEAD.x + chestDX * 1.25;
+                const targetHeadY = BASE_HEAD.y + (nodes.chest.y - BASE_CHEST.y) * 1.1;
+                applySpring(nodes.head, targetHeadX, targetHeadY, 0.07 * stiffnessMult, dampingMult);
+
+                // 5. Arms Physics
+                const shoulderLeft = { x: nodes.chest.x - 25, y: nodes.chest.y + 15 };
+                const targetLeftElbowX = shoulderLeft.x - 30 + chestDX * 0.4;
+                const targetLeftElbowY = shoulderLeft.y + 50 + Math.abs(chestDX) * 0.2;
+                applySpring(nodes.leftElbow, targetLeftElbowX, targetLeftElbowY, 0.1, 0.80);
+
+                const targetLeftHandX = nodes.leftElbow.x - 15 + chestDX * 0.6;
+                const targetLeftHandY = nodes.leftElbow.y + 60;
+                applySpring(nodes.leftHand, targetLeftHandX, targetLeftHandY, 0.08, 0.78);
+
+                const shoulderRight = { x: nodes.chest.x + 25, y: nodes.chest.y + 15 };
+                const targetRightElbowX = shoulderRight.x + 30 + chestDX * 0.4;
+                const targetRightElbowY = shoulderRight.y + 50 + Math.abs(chestDX) * 0.2;
+                applySpring(nodes.rightElbow, targetRightElbowX, targetRightElbowY, 0.1, 0.80);
+
+                const targetRightHandX = nodes.rightElbow.x + 15 + chestDX * 0.6;
+                const targetRightHandY = nodes.rightElbow.y + 60;
+                applySpring(nodes.rightHand, targetRightHandX, targetRightHandY, 0.08, 0.78);
+
+                // 6. Floating Disco Texts Physics & Collision Check
+                globalHue = (globalHue + 2.5) % 360;
+                const timeSec = Date.now() * 0.003;
+
+                // Collidable Body Nodes
+                const bodyNodes = [
+                    { x: nodes.head.x, y: nodes.head.y, r: 28, vx: nodes.head.vx, vy: nodes.head.vy },
+                    { x: nodes.chest.x, y: nodes.chest.y, r: 25, vx: nodes.chest.vx, vy: nodes.chest.vy },
+                    { x: nodes.pelvis.x, y: nodes.pelvis.y, r: 25, vx: nodes.pelvis.vx, vy: nodes.pelvis.vy },
+                    { x: nodes.leftElbow.x, y: nodes.leftElbow.y, r: 20, vx: nodes.leftElbow.vx, vy: nodes.leftElbow.vy },
+                    { x: nodes.rightElbow.x, y: nodes.rightElbow.y, r: 20, vx: nodes.rightElbow.vx, vy: nodes.rightElbow.vy },
+                    { x: nodes.leftHand.x, y: nodes.leftHand.y, r: 18, vx: nodes.leftHand.vx, vy: nodes.leftHand.vy },
+                    { x: nodes.rightHand.x, y: nodes.rightHand.y, r: 18, vx: nodes.rightHand.vx, vy: nodes.rightHand.vy }
+                ];
+
+                floatingTexts.forEach((item, idx) => {
+                    if (item.isKnocked) {
+                        // Dynamic deflection bounce
+                        item.x += item.vx;
+                        item.y += item.vy;
+                        // Mild spring towards center Y (280) so text stays focused in mid area
+                        item.vy += (280 - item.y) * 0.008; 
+                        item.vx *= 0.96;
+                        item.vy *= 0.96;
+                        item.rot += item.vRot;
+                        item.vRot *= 0.97;
+
+                        // Stage bounce limits (Focused around middle/top area)
+                        if (item.x < 35 || item.x > 365) {
+                            item.vx = -item.vx * 0.8;
+                            item.vRot = -item.vRot;
+                            item.x = clamp(item.x, 35, 365);
+                        }
+                        if (item.y < 60 || item.y > 480) {
+                            item.vy = -item.vy * 0.8;
+                            item.y = clamp(item.y, 60, 480);
+                        }
+
+                        const currentSpeed = Math.hypot(item.vx, item.vy);
+                        if (currentSpeed < 2.0) {
+                            item.isKnocked = false;
+                            const wanderAngle = Math.random() * Math.PI * 2;
+                            const wanderSpeed = 1.0 + Math.random() * 1.2;
+                            item.vx = Math.cos(wanderAngle) * wanderSpeed;
+                            item.vy = Math.sin(wanderAngle) * wanderSpeed;
+                            item.vRot = (Math.random() - 0.5) * 1.5;
+                        }
+                    } else {
+                        // Free-roaming movement in mid/upper area
+                        item.targetChangeTimer--;
+                        if (item.targetChangeTimer <= 0) {
+                            const nudgeAngle = (Math.random() - 0.5) * 1.2;
+                            const curAngle = Math.atan2(item.vy, item.vx) + nudgeAngle;
+                            const cruiseSpeed = 1.0 + Math.random() * 1.4;
+                            item.vx = Math.cos(curAngle) * cruiseSpeed;
+                            item.vy = Math.sin(curAngle) * cruiseSpeed;
+                            item.vRot = (Math.random() - 0.5) * 1.5;
+                            item.targetChangeTimer = 60 + Math.random() * 100;
+                        }
+
+                        item.x += item.vx;
+                        item.y += item.vy;
+                        item.rot += item.vRot * 0.4;
+
+                        // Bounds keeping texts in middle/upper region (y: 70 - 480)
+                        const minX = 35, maxX = 365, minY = 70, maxY = 480;
+                        if (item.x < minX) { item.x = minX; item.vx = Math.abs(item.vx); }
+                        if (item.x > maxX) { item.x = maxX; item.vx = -Math.abs(item.vx); }
+                        if (item.y < minY) { item.y = minY; item.vy = Math.abs(item.vy); }
+                        if (item.y > maxY) { item.y = maxY; item.vy = -Math.abs(item.vy); }
+
+                        item.opacity = 0.90 + Math.sin(timeSec * 2.5 + item.phase) * 0.10;
+
+                        // Collision detection with stickman
+                        for (let bNode of bodyNodes) {
+                            const dx = item.x - bNode.x;
+                            const dy = item.y - bNode.y;
+                            const dist = Math.hypot(dx, dy);
+
+                            if (dist < bNode.r + 26) {
+                                const pushAngle = Math.atan2(dy, dx);
+                                const speed = Math.hypot(bNode.vx, bNode.vy) + 14;
+                                const force = Math.max(16, speed * 1.2);
+
+                                item.vx = Math.cos(pushAngle) * force + (Math.random() - 0.5) * 5;
+                                item.vy = Math.sin(pushAngle) * force - 4;
+                                item.vRot = (Math.random() > 0.5 ? 1 : -1) * (14 + Math.random() * 16);
+                                item.isKnocked = true;
+                                item.opacity = 1;
+
+                                spawnRipple(item.x, item.y);
+                                break;
+                            }
+                        }
+                    }
+                });
+            }
+
+            function render() {
+                // Update Floating Disco Text Elements
+                floatingTexts.forEach((item, idx) => {
+                    const textHue = (globalHue + idx * 36) % 360;
+                    item.el.setAttribute('transform', `translate(${item.x}, ${item.y}) rotate(${item.rot})`);
+                    // Vibrant disco color + dark outline ensures top legibility
+                    item.el.setAttribute('fill', `hsl(${textHue}, 100%, 65%)`);
+                    item.el.setAttribute('opacity', item.opacity.toFixed(2));
+                });
+
+                // Update Foot Visuals & Shadows
+                dom.leftFoot.setAttribute('d', `M ${nodes.leftFoot.x - 15} ${nodes.leftFoot.y} L ${nodes.leftFoot.x} ${nodes.leftFoot.y}`);
+                dom.rightFoot.setAttribute('d', `M ${nodes.rightFoot.x} ${nodes.rightFoot.y} L ${nodes.rightFoot.x + 15} ${nodes.rightFoot.y}`);
+
+                dom.leftFootShadow.setAttribute('cx', nodes.leftFoot.x);
+                dom.leftFootShadow.setAttribute('cy', Math.max(FLOOR_Y, nodes.leftFoot.y + 2));
+                dom.rightFootShadow.setAttribute('cx', nodes.rightFoot.x);
+                dom.rightFootShadow.setAttribute('cy', Math.max(FLOOR_Y, nodes.rightFoot.y + 2));
+
+                // LEGS IK CALCULATION
+                const leftHip  = { x: nodes.pelvis.x - 16, y: nodes.pelvis.y + 5 };
+                const rightHip = { x: nodes.pelvis.x + 16, y: nodes.pelvis.y + 5 };
+
+                const leftLegIK = solve2SegmentIK(leftHip, nodes.leftFoot, true, true);
+                const rightLegIK = solve2SegmentIK(rightHip, nodes.rightFoot, true, false);
+
+                if (leftLegIK.knee.x > rightLegIK.knee.x - 15) {
+                    const kneeMid = (leftLegIK.knee.x + rightLegIK.knee.x) / 2;
+                    leftLegIK.knee.x = kneeMid - 7.5;
+                    rightLegIK.knee.x = kneeMid + 7.5;
+                }
+
+                // Render Left Leg
+                dom.leftUpperLeg.setAttribute('x1', leftHip.x);
+                dom.leftUpperLeg.setAttribute('y1', leftHip.y);
+                dom.leftUpperLeg.setAttribute('x2', leftLegIK.knee.x);
+                dom.leftUpperLeg.setAttribute('y2', leftLegIK.knee.y);
+
+                dom.leftLowerLeg.setAttribute('x1', leftLegIK.knee.x);
+                dom.leftLowerLeg.setAttribute('y1', leftLegIK.knee.y);
+                dom.leftLowerLeg.setAttribute('x2', nodes.leftFoot.x);
+                dom.leftLowerLeg.setAttribute('y2', nodes.leftFoot.y);
+
+                dom.leftKneeJoint.setAttribute('cx', leftLegIK.knee.x);
+                dom.leftKneeJoint.setAttribute('cy', leftLegIK.knee.y);
+
+                // Render Right Leg
+                dom.rightUpperLeg.setAttribute('x1', rightHip.x);
+                dom.rightUpperLeg.setAttribute('y1', rightHip.y);
+                dom.rightUpperLeg.setAttribute('x2', rightLegIK.knee.x);
+                dom.rightUpperLeg.setAttribute('y2', rightLegIK.knee.y);
+
+                dom.rightLowerLeg.setAttribute('x1', rightLegIK.knee.x);
+                dom.rightLowerLeg.setAttribute('y1', rightLegIK.knee.y);
+                dom.rightLowerLeg.setAttribute('x2', nodes.rightFoot.x);
+                dom.rightLowerLeg.setAttribute('y2', nodes.rightFoot.y);
+
+                dom.rightKneeJoint.setAttribute('cx', rightLegIK.knee.x);
+                dom.rightKneeJoint.setAttribute('cy', rightLegIK.knee.y);
+
+                // TORSO & UPPER BODY
+                const midControlX = (nodes.pelvis.x + nodes.chest.x) / 2 + (nodes.chest.x - BASE_CHEST.x) * 0.25;
+                const midControlY = (nodes.pelvis.y + nodes.chest.y) / 2;
+
+                const torsoPathD = `M ${nodes.pelvis.x} ${nodes.pelvis.y} Q ${midControlX} ${midControlY} ${nodes.chest.x} ${nodes.chest.y}`;
+                dom.torsoPath.setAttribute('d', torsoPathD);
+
+                dom.pelvisJoint.setAttribute('cx', nodes.pelvis.x);
+                dom.pelvisJoint.setAttribute('cy', nodes.pelvis.y);
+
+                // Neck & Head
+                dom.neckLine.setAttribute('x1', nodes.chest.x);
+                dom.neckLine.setAttribute('y1', nodes.chest.y);
+                dom.neckLine.setAttribute('x2', nodes.head.x);
+                dom.neckLine.setAttribute('y2', nodes.head.y + HEAD_RADIUS - 4);
+
+                const headTiltAngle = (nodes.head.x - nodes.chest.x) * 0.4;
+                dom.headGroup.setAttribute('transform', `translate(${nodes.head.x}, ${nodes.head.y}) rotate(${headTiltAngle})`);
+
+                const eyeOffset = clamp((nodes.head.x - BASE_HEAD.x) * 0.05, -3, 3);
+                dom.eyeLeft.setAttribute('cx', -7 + eyeOffset);
+                dom.eyeRight.setAttribute('cx', 7 + eyeOffset);
+
+                // Arms
+                const shoulderLeft = { x: nodes.chest.x - 22, y: nodes.chest.y + 12 };
+                const shoulderRight = { x: nodes.chest.x + 22, y: nodes.chest.y + 12 };
+
+                dom.leftUpperArm.setAttribute('x1', shoulderLeft.x);
+                dom.leftUpperArm.setAttribute('y1', shoulderLeft.y);
+                dom.leftUpperArm.setAttribute('x2', nodes.leftElbow.x);
+                dom.leftUpperArm.setAttribute('y2', nodes.leftElbow.y);
+
+                dom.leftLowerArm.setAttribute('x1', nodes.leftElbow.x);
+                dom.leftLowerArm.setAttribute('y1', nodes.leftElbow.y);
+                dom.leftLowerArm.setAttribute('x2', nodes.leftHand.x);
+                dom.leftLowerArm.setAttribute('y2', nodes.leftHand.y);
+
+                dom.leftElbowJoint.setAttribute('cx', nodes.leftElbow.x);
+                dom.leftElbowJoint.setAttribute('cy', nodes.leftElbow.y);
+
+                dom.rightUpperArm.setAttribute('x1', shoulderRight.x);
+                dom.rightUpperArm.setAttribute('y1', shoulderRight.y);
+                dom.rightUpperArm.setAttribute('x2', nodes.rightElbow.x);
+                dom.rightUpperArm.setAttribute('y2', nodes.rightElbow.y);
+
+                dom.rightLowerArm.setAttribute('x1', nodes.rightElbow.x);
+                dom.rightLowerArm.setAttribute('y1', nodes.rightElbow.y);
+                dom.rightLowerArm.setAttribute('x2', nodes.rightHand.x);
+                dom.rightLowerArm.setAttribute('y2', nodes.rightHand.y);
+
+                dom.rightElbowJoint.setAttribute('cx', nodes.rightElbow.x);
+                dom.rightElbowJoint.setAttribute('cy', nodes.rightElbow.y);
+
+                // Dynamic Shadow
+                const swayAbs = Math.abs(nodes.chest.x - BASE_CHEST.x);
+                const shadowScaleX = Math.max(0.5, 1 - swayAbs / 250);
+                dom.bodyCenterShadow.setAttribute('cx', 200 + (nodes.pelvis.x - BASE_PELVIS.x) * 0.5);
+                dom.bodyCenterShadow.setAttribute('rx', 35 * shadowScaleX);
+
+                // Speech Bubble Positioning
+                if (speechContainer.style.display !== 'none') {
+                    const ctm = svg.getScreenCTM();
+                    if (ctm) {
+                        const headPt = svg.createSVGPoint();
+                        headPt.x = nodes.head.x;
+                        headPt.y = nodes.head.y - HEAD_RADIUS - 20;
+                        const screenPt = headPt.matrixTransform(ctm);
+                        const stageRect = stage.getBoundingClientRect();
+
+                        const relativeX = screenPt.x - stageRect.left;
+                        const relativeY = screenPt.y - stageRect.top;
+
+                        speechContainer.style.left = `${relativeX}px`;
+                        speechContainer.style.top = `${relativeY}px`;
+                        speechContainer.style.transform = `translate(-50%, -100%)`;
+                    }
+                }
+            }
+
+            /* ------------------------------------------------------------------
+             * 8. INTERACTION & DODGING LOGIC
+             * ------------------------------------------------------------------ */
+            function applyDodgeImpulse(svgClickPt) {
+                const dx = svgClickPt.x - nodes.pelvis.x;
+                const pushDirX = dx >= 0 ? -1 : 1;
+
+                const heightFactor = clamp((680 - svgClickPt.y) / 500, 0.3, 1.4);
+                const variation = 0.95 + Math.random() * 0.1;
+
+                const forceX = pushDirX * (85 + Math.random() * 35) * heightFactor * variation;
+                const forceY = (Math.random() - 0.3) * 20;
+
+                nodes.chest.vx += forceX * 0.85;
+                nodes.chest.vy += forceY;
+
+                nodes.head.vx += forceX * 1.1;
+                nodes.head.vy += forceY * 1.2;
+
+                nodes.pelvis.vx += forceX * 0.4;
+                nodes.pelvis.vy += Math.abs(forceX) * 0.12;
+
+                nodes.leftFoot.vx += forceX * 0.08;
+                nodes.leftFoot.vy -= Math.abs(forceX) * 0.05;
+
+                nodes.rightFoot.vx += forceX * 0.08;
+                nodes.rightFoot.vy -= Math.abs(forceX) * 0.05;
+
+                spawnRipple(svgClickPt.x, svgClickPt.y);
+
+                dodgeCount++;
+                dodgeCounterEl.innerText = dodgeCount;
+                dodgeCounterEl.classList.add('scale-125', 'text-indigo-500');
+                setTimeout(() => dodgeCounterEl.classList.remove('scale-125', 'text-indigo-500'), 200);
+
+                if (Math.random() < 0.45) {
+                    triggerSpeechBubble();
+                }
+            }
+
+            function spawnRipple(x, y) {
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', x);
+                circle.setAttribute('cy', y);
+                circle.setAttribute('r', '5');
+                circle.setAttribute('fill', 'none');
+                circle.setAttribute('stroke', 'rgba(99, 102, 241, 0.4)');
+                circle.setAttribute('stroke-width', '3');
+                rippleSvg.appendChild(circle);
+
+                let radius = 5;
+                let opacity = 0.5;
+                function animateRipple() {
+                    radius += 2.5;
+                    opacity -= 0.025;
+                    circle.setAttribute('r', radius);
+                    circle.setAttribute('stroke', `rgba(99, 102, 241, ${Math.max(0, opacity)})`);
+                    if (opacity > 0) {
+                        requestAnimationFrame(animateRipple);
+                    } else {
+                        circle.remove();
+                    }
+                }
+                requestAnimationFrame(animateRipple);
+            }
+
+            function triggerSpeechBubble() {
+                if (speechTimeout) clearTimeout(speechTimeout);
+                const phrase = speechPhrases[Math.floor(Math.random() * speechPhrases.length)];
+                speechText.innerText = phrase;
+                speechContainer.style.display = 'block';
+
+                speechTimeout = setTimeout(() => {
+                    speechContainer.style.display = 'none';
+                }, 1600);
+            }
+
+            function getSvgPoint(e) {
+                const pt = svg.createSVGPoint();
+                if (e.touches && e.touches[0]) {
+                    pt.x = e.touches[0].clientX;
+                    pt.y = e.touches[0].clientY;
+                } else {
+                    pt.x = e.clientX;
+                    pt.y = e.clientY;
+                }
+                const ctm = svg.getScreenCTM();
+                return ctm ? pt.matrixTransform(ctm.inverse()) : { x: 200, y: 300 };
+            }
+
+            stage.addEventListener('pointerdown', (e) => {
+                e.preventDefault();
+                const svgPt = getSvgPoint(e);
+                applyDodgeImpulse(svgPt);
+            });
+
+            window.addEventListener('keydown', (e) => {
+                if (e.code === 'Space' || e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'Enter') {
+                    e.preventDefault();
+                    const dir = e.code === 'ArrowLeft' ? -1 : (e.code === 'ArrowRight' ? 1 : (Math.random() > 0.5 ? 1 : -1));
+                    applyDodgeImpulse({ x: 200 + dir * 60, y: 250 });
+                }
+            });
+
+            resetBtn.addEventListener('click', () => {
+                dodgeCount = 0;
+                dodgeCounterEl.innerText = '0';
+                
+                nodes.pelvis.x = BASE_PELVIS.x; nodes.pelvis.y = BASE_PELVIS.y; nodes.pelvis.vx = 0; nodes.pelvis.vy = 0;
+                nodes.chest.x = BASE_CHEST.x;   nodes.chest.y = BASE_CHEST.y;   nodes.chest.vx = 0;   nodes.chest.vy = 0;
+                nodes.head.x = BASE_HEAD.x;     nodes.head.y = BASE_HEAD.y;     nodes.head.vx = 0;    nodes.head.vy = 0;
+
+                nodes.leftFoot.x = BASE_LEFT_FOOT.x;   nodes.leftFoot.y = BASE_LEFT_FOOT.y;   nodes.leftFoot.vx = 0;   nodes.leftFoot.vy = 0;
+                nodes.rightFoot.x = BASE_RIGHT_FOOT.x; nodes.rightFoot.y = BASE_RIGHT_FOOT.y; nodes.rightFoot.vx = 0; nodes.rightFoot.vy = 0;
+
+                // Reset text positions back around center/upper region
+                floatingTexts.forEach((item) => {
+                    item.x = 40 + Math.random() * 320;
+                    item.y = 100 + Math.random() * 380;
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = 1.0 + Math.random() * 1.3;
+                    item.vx = Math.cos(angle) * speed;
+                    item.vy = Math.sin(angle) * speed;
+                    item.rot = (Math.random() - 0.5) * 16;
+                    item.vRot = (Math.random() - 0.5) * 1.5;
+                    item.isKnocked = false;
+                    item.opacity = 1;
+                });
+
+                speechContainer.style.display = 'none';
+            });
+
+            window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (e) => {
+                prefersReducedMotion = e.matches;
+            });
+
+            function tick() {
+                updatePhysics();
+                render();
+                requestAnimationFrame(tick);
+            }
+
+            window.onload = function() {
+                tick();
+            };
+
+        })();
+    </script>
+</body>
+</html>
